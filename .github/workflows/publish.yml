@@ -1,0 +1,52 @@
+name: publish
+
+# Renders cli.sh and agent.sh from install.sh and deploys them to GitHub Pages
+# (https://get.rfabric.io).
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: pages
+  cancel-in-progress: false
+
+jobs:
+  build:
+    name: render installers
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+
+      - name: Check
+        run: |
+          sh -n install.sh
+          shellcheck --shell=sh install.sh
+          shellcheck render.sh
+
+      - name: Render
+        env:
+          GET_URL: https://get.rfabric.io
+          LINUX_URL: https://linux.rfabric.io
+        run: ./render.sh _site
+
+      - uses: actions/upload-pages-artifact@v5
+        with:
+          path: _site
+
+  deploy:
+    name: deploy to GitHub Pages
+    needs: build
+    runs-on: ubuntu-latest
+    permissions:
+      pages: write
+      id-token: write
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - id: deployment
+        uses: actions/deploy-pages@v5
