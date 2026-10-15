@@ -54,21 +54,27 @@ package_manager() {
     fi
 }
 
+# Every repository file is downloaded into a temporary directory first and installed only
+# after the download succeeded, so a network failure never leaves an empty key or source.
 install_package() {
     manager="$1"
     log "adding the rFabric ${CHANNEL} package repository (${LINUX_URL})"
+    tmp=$(mktemp -d)
+    trap 'rm -rf "${tmp}"' EXIT
+    curl -fsSL -o "${tmp}/rfabric.asc" "${LINUX_URL}/rfabric.asc" || err "failed to download ${LINUX_URL}/rfabric.asc"
     if [ "${manager}" = apt-get ]; then
+        echo "deb [signed-by=/etc/apt/keyrings/rfabric.asc] ${LINUX_URL}/deb ${CHANNEL} main" > "${tmp}/rfabric.list"
         as_root install -d -m 0755 /etc/apt/keyrings
-        curl -fsSL "${LINUX_URL}/rfabric.asc" | as_root tee /etc/apt/keyrings/rfabric.asc > /dev/null
-        as_root chmod 0644 /etc/apt/keyrings/rfabric.asc
-        echo "deb [signed-by=/etc/apt/keyrings/rfabric.asc] ${LINUX_URL}/deb ${CHANNEL} main" \
-            | as_root tee /etc/apt/sources.list.d/rfabric.list > /dev/null
+        as_root install -m 0644 "${tmp}/rfabric.asc" /etc/apt/keyrings/rfabric.asc
+        as_root install -m 0644 "${tmp}/rfabric.list" /etc/apt/sources.list.d/rfabric.list
         as_root apt-get update < /dev/null
         log "installing package ${BINARY}"
         as_root env DEBIAN_FRONTEND=noninteractive apt-get install -y "${BINARY}" < /dev/null
     else
-        as_root rpm --import "${LINUX_URL}/rfabric.asc"
-        curl -fsSL "${LINUX_URL}/rpm/rfabric-${CHANNEL}.repo" | as_root tee /etc/yum.repos.d/rfabric.repo > /dev/null
+        curl -fsSL -o "${tmp}/rfabric.repo" "${LINUX_URL}/rpm/rfabric-${CHANNEL}.repo" \
+            || err "failed to download ${LINUX_URL}/rpm/rfabric-${CHANNEL}.repo"
+        as_root rpm --import "${tmp}/rfabric.asc"
+        as_root install -m 0644 "${tmp}/rfabric.repo" /etc/yum.repos.d/rfabric.repo
         log "installing package ${BINARY}"
         as_root "${manager}" install -y "${BINARY}" < /dev/null
     fi
